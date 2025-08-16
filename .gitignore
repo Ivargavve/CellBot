@@ -13,3 +13,4 @@
 
 # tillåt även gitignore själv
 !.gitignore
+!LICENSE
