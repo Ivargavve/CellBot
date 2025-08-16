@@ -3,7 +3,7 @@
 Tre varianter av en auto-clicker / cyklisk bottare byggd i Python.  
 Alla tre startas/stoppas med **F6** och använder Tkinter för GUI.
 
-![CellBot Screenshot](https://raw.githubusercontent.com/Ivargavve/CellBot/v3/cellbotv3.png)
+![CellBot Screenshot](v3/cellbotv3.png)
 
 ---
 
