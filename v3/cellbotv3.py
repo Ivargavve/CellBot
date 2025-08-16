@@ -53,15 +53,15 @@ class MOUSEINPUT(ctypes.Structure):
     )
 
 class INPUT(ctypes.Structure):
-    _fields_ = (( 'type', wintypes.DWORD ), ('mi', MOUSEINPUT))
+    _fields_ = (('type', wintypes.DWORD), ('mi', MOUSEINPUT))
 
 class POINT(ctypes.Structure):
     _fields_ = (("x", wintypes.LONG), ("y", wintypes.LONG))
 
 def send_left_click():
     events = (INPUT * 2)()
-    events[0].type, events[0].mi = INPUT_MOUSE, MOUSEINPUT(0,0,0,MOUSEEVENTF_LEFTDOWN,0,None)
-    events[1].type, events[1].mi = INPUT_MOUSE, MOUSEINPUT(0,0,0,MOUSEEVENTF_LEFTUP,  0,None)
+    events[0].type, events[0].mi = INPUT_MOUSE, MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, None)
+    events[1].type, events[1].mi = INPUT_MOUSE, MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP,   0, None)
     user32.SendInput(2, ctypes.byref(events), ctypes.sizeof(INPUT))
 
 def get_cursor_pos():
@@ -75,9 +75,12 @@ def set_cursor_pos(x, y):
 # -------------------- defaults (från v2 + v1) --------------------
 DEFAULT_LOOP_S = 60.0
 DEFAULT_BOOST_S = 965.0
-DEFAULT_CLICK_DELAY = 0.03
+DEFAULT_CLICK_DELAY = 0.1  # ändrat till 0.1 s
 DEFAULT_IDLE_HZ = 50.0
 EMERGENCY_MARGIN = 5  # px (övre vänstra hörnet)
+
+# Skip Ad standardkoordinat enligt bilden: (962, 712)
+DEFAULT_SKIP_AD_POS = (962, 712)
 
 DEFAULT_MENU_TOGGLE = (35, 427)
 DEFAULT_TAB1_POS = (47, 40)
@@ -105,7 +108,6 @@ CTX2_TAB3_POINTS = list(CTX2_TAB1_POINTS)
 CONTEXTS = ["Context 1", "Context 2", "Context 3", "Context 4"]
 
 # -------------------- PyAutoGUI helpers (v2-del) --------------------
-
 def click_xy(x, y, settle=0.05):
     pyautogui.moveTo(int(x), int(y), duration=0)
     pyautogui.click()
@@ -124,6 +126,7 @@ class CellBotV3:
         self.bot_thread = None
 
         # v2 fasta pos
+        self.skip_ad_pos = DEFAULT_SKIP_AD_POS  # ny
         self.menu_toggle = DEFAULT_MENU_TOGGLE
         self.tab1_pos    = DEFAULT_TAB1_POS
         self.tab2_pos    = DEFAULT_TAB2_POS
@@ -155,9 +158,9 @@ class CellBotV3:
         # v1-lik bakgrundsklickare (idle)
         self.idle_enable_var = tk.BooleanVar(value=True)
         self.idle_hz_var     = tk.StringVar(value=f"{DEFAULT_IDLE_HZ}")
-        self.idle_mode_var   = tk.StringVar(value="current")  # current|fixed
-        self.idle_x_var      = tk.StringVar(value="0")
-        self.idle_y_var      = tk.StringVar(value="0")
+        self.idle_mode_var   = tk.StringVar(value="fixed")  # ändrat: default fixed
+        self.idle_x_var      = tk.StringVar(value="1651")   # ändrat default
+        self.idle_y_var      = tk.StringVar(value="0")      # ändrat default
 
         self.status_var = tk.StringVar(value="status: idle  •  press F6 to start/stop")
 
@@ -186,6 +189,13 @@ class CellBotV3:
 
         lf_tabs = ttk.Labelframe(left, text="Menu & Tabs")
         lf_tabs.pack(fill="x", pady=(0,10))
+
+        # Skip Ad
+        srow = ttk.Frame(lf_tabs); srow.pack(fill="x", pady=6)
+        ttk.Label(srow, text="Skip Ad").pack(side="left")
+        self.skip_ad_label = ttk.Label(srow, text=f"{self.skip_ad_pos[0]},{self.skip_ad_pos[1]}", foreground="#222")
+        self.skip_ad_label.pack(side="right")
+        ttk.Button(lf_tabs, text="Pick Skip Ad", command=self._pick_skip_ad).pack(fill="x")
 
         # menu toggle
         mrow = ttk.Frame(lf_tabs); mrow.pack(fill="x", pady=6)
@@ -326,7 +336,6 @@ class CellBotV3:
 
     def _update_idle_mode_state(self):
         fixed = self.idle_mode_var.get() == "fixed"
-        state = ("!disabled" if fixed else "disabled")
         if fixed:
             self.idle_x_entry.state(["!disabled"])
             self.idle_y_entry.state(["!disabled"])
@@ -350,6 +359,10 @@ class CellBotV3:
                 lb.insert("end", f"{x},{y}")
 
     # ---------- Picking ----------
+    def _pick_skip_ad(self):
+        self.status_var.set("pick: click Skip Ad…")
+        self._pick_one(self._set_skip_ad)
+
     def _pick_menu_toggle(self):
         self.status_var.set("pick: click Menu toggle…")
         self._pick_one(self._set_menu_toggle)
@@ -399,6 +412,10 @@ class CellBotV3:
         listener.start()
 
     # setters
+    def _set_skip_ad(self, pt):
+        self.skip_ad_pos = pt
+        self.skip_ad_label.config(text=f"{pt[0]},{pt[1]}", foreground="#222")
+
     def _set_menu_toggle(self, pt):
         self.menu_toggle = pt
         self.menu_label.config(text=f"{pt[0]},{pt[1]}", foreground="#222")
@@ -460,9 +477,9 @@ class CellBotV3:
             idle_enabled = self.idle_enable_var.get()
             try:
                 idle_hz = float(self.idle_hz_var.get())
-                idle_interval = 1.0/idle_hz if idle_hz > 0 else 0.02
+                idle_interval = 1.0 / idle_hz if idle_hz > 0 else 0.02
             except:
-                idle_interval = 1.0/DEFAULT_IDLE_HZ
+                idle_interval = 1.0 / DEFAULT_IDLE_HZ
             idle_mode = self.idle_mode_var.get()
             if idle_mode == "fixed":
                 try:
@@ -488,8 +505,12 @@ class CellBotV3:
                 # 1) Kör cykeln när det är dags
                 if now >= next_cycle:
                     pts_t1 = list(self.points[ctx]["t1"])  # kopior för trådtrygghet
-                    pts_t2 = list(self.points[ctx]["t2"]) 
-                    pts_t3 = list(self.points[ctx]["t3"]) 
+                    pts_t2 = list(self.points[ctx]["t2"])
+                    pts_t3 = list(self.points[ctx]["t3"])
+
+                    # Skip Ad innan Menu Toggle
+                    if self.skip_ad_pos:
+                        click_xy(*self.skip_ad_pos, settle=click_delay)
 
                     # Menu Toggle
                     click_xy(*self.menu_toggle, settle=click_delay)
@@ -520,7 +541,7 @@ class CellBotV3:
                     # schemalägg nästa cykel
                     next_cycle = now + loop_iv
 
-                    # efter cykeln: tryck ned idle-next så att idle kan börja direkt
+                    # efter cykeln: låt idle börja direkt
                     next_idle_click = time.perf_counter()
 
                 # 2) Annars idle-klicka i mellanrummen (v1-style)
