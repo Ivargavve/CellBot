@@ -8,6 +8,7 @@
 !*.py
 !*.exe
 !*.ps1
+!*.md
 
 # tillåt även gitignore själv
 !.gitignore
