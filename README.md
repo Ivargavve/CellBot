@@ -3,7 +3,7 @@
 Tre varianter av en auto-clicker / cyklisk bottare byggd i Python.  
 Alla tre startas/stoppas med **F6** och använder Tkinter för GUI.
 
-![CellBot](v3/cellbotv3.png)
+![CellBot3](v3/cellbotv3.png)
 
 ---
 
@@ -20,7 +20,7 @@ Inställningar:
 Extra:
 - Nödstopp genom att dra musen till övre vänstra hörnet (<5px).
 
-![CellBot](v1/cellbotv1.png)
+![CellBot1](v1/cellbotv1.png)
 
 ---
 
@@ -39,7 +39,7 @@ Inställningar:
 - Togglar för vilka tabs som används  
 - Click delay mellan klick  
 
-![CellBot](v2/cellbotv2.png)
+![CellBot2](v2/cellbotv2.png)
 
 ---
 
