@@ -1,0 +1,13 @@
+# ignorera allt
+*
+
+# tillåt mappar
+!*/
+
+# tillåt bara dessa filtyper
+!*.py
+!*.exe
+!*.ps1
+
+# tillåt även gitignore själv
+!.gitignore
