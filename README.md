@@ -1,9 +1,9 @@
 # CellBot
 
-Tre varianter av en auto-clicker / cyklisk bottare byggd i Python.  
-Alla tre startas/stoppas med **F6** och använder Tkinter för GUI.
+### Cell to Singularity Helper Bot
 
-![CellBot3](v3/cellbotv3.png)
+Tre varianter av en auto-clicker / spel bot, byggd i Python.  
+Alla tre startas/stoppas med **F6** och använder Tkinter för GUI.
 
 ---
 
@@ -25,7 +25,7 @@ Extra:
 ---
 
 ## CellBot v2
-En mer avancerad cyklisk bot som kör sekvenser:
+En mer avancerad bot som kör sekvenser:
 1. Menu Toggle  
 2. (Valfritt) Tab 1  
 3. (Valfritt) Tab 2  
@@ -48,13 +48,9 @@ Kombinerar v1 och v2:
 - Kör **cykeln från v2** enligt schema.  
 - Mellan cyklerna körs **idle-klickaren från v1** (med frekvens, current/fixed mode och pick-funktion).  
 
-Perfekt om du vill ha både en cyklisk sekvens och kontinuerliga klick däremellan.
+![CellBot3](v3/cellbotv3.png)
 
 ---
 
-## Bygga till .exe
-Bottarna kan packas med [PyInstaller](https://pyinstaller.org/).  
-Exempel för v3:
+### Ivar Gavelin 2025
 
-```powershell
-pyinstaller --noconsole --onefile cellbotv3.py
