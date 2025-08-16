@@ -20,6 +20,8 @@ Inställningar:
 Extra:
 - Nödstopp genom att dra musen till övre vänstra hörnet (<5px).
 
+![CellBot](v1/cellbotv1.png)
+
 ---
 
 ## CellBot v2
@@ -36,6 +38,8 @@ Inställningar:
 - Per-kontext klickpunkter (Context 1–4)  
 - Togglar för vilka tabs som används  
 - Click delay mellan klick  
+
+![CellBot](v2/cellbotv2.png)
 
 ---
 
