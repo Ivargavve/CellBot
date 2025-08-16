@@ -9,6 +9,7 @@
 !*.exe
 !*.ps1
 !*.md
+!*.png
 
 # tillåt även gitignore själv
 !.gitignore
