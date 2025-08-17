@@ -2,9 +2,13 @@
 # Kombinerar CellBot v2 (cyklisk sekvens med tabs/boost) med en "idle"-klickare
 # som beter sig som CellBot v1 mellan cyklerna.
 #
-# Önskad cykel (om x1-prepass är på):
-#   Skip Ad -> Menu Toggle -> Buy mode (x1) -> köp 3 första raderna (på Generator-fliken) ->
-#   Buy mode (4 klick) till SMART -> Tab1/Tab2/Tab3 (vanliga klick) -> ev. Boost
+# Nytt:
+#  - Top N buy (standard N=1) istället för Top 3, justerbart i UI.
+#  - Ordningen mellan TopN Buy, Tab1, Tab2, Tab3 är ändringsbar i UI (standard som tidigare).
+#
+# Önskad cykel (om x1-prepass är på, default N=1):
+#   Skip Ad -> Menu Toggle -> Buy mode (x1) -> köp N första raderna (på Generator-fliken) ->
+#   Buy mode (4 klick) till SMART -> därefter Tab1/Tab2/Tab3 enligt vald ordning -> ev. Boost
 #
 # Hotkey: F6 start/stop. Nödstopp: flytta musen till övre vänstra hörnet (<5 px).
 #
@@ -89,7 +93,7 @@ DEFAULT_BOOST_POINT = (654, 1028)
 DEFAULT_BUYMODE_POS = (468, 108)  # växla mellan SMART/x1
 DEFAULT_SMART_TO_X1_CLICKS = 1    # 1 klick till x1
 DEFAULT_X1_TO_SMART_CLICKS = 4    # 4 klick tillbaka till SMART
-TOP_N_PREPASS = 3                 # 3 första raderna (överst)
+DEFAULT_TOPN_PREPASS = 1          # standard N = 1
 PREPASS_TAB_KEY = "t2"            # Kör prepass endast på Generator-fliken (antag Tab 2)
 
 # Exempelkoordinater per tab och kontext
@@ -124,7 +128,7 @@ class CellBotV3:
     def __init__(self, root):
         self.root = root
         self.root.title("CellBot v3")
-        self.root.minsize(1180, 700)
+        self.root.minsize(1180, 720)
 
         # run state
         self.running = False
@@ -144,6 +148,7 @@ class CellBotV3:
         self.smart_to_x1_clicks = DEFAULT_SMART_TO_X1_CLICKS
         self.x1_to_smart_clicks = DEFAULT_X1_TO_SMART_CLICKS
         self.prepass_tab_key = PREPASS_TAB_KEY  # "t1"/"t2"/"t3" (antag "t2" = Generator)
+        self.topn_var = tk.IntVar(value=DEFAULT_TOPN_PREPASS)  # N för TopN
 
         # v2 per-kontext punkter
         self.points = {
@@ -166,6 +171,9 @@ class CellBotV3:
         self.use_tab1_var = tk.BooleanVar(value=False)
         self.use_tab2_var = tk.BooleanVar(value=True)
         self.use_tab3_var = tk.BooleanVar(value=True)
+
+        # ordning för cykeln (kan ändras i UI). Nycklar: "topn","t1","t2","t3"
+        self.cycle_order = ["topn", "t1", "t2", "t3"]
 
         # v1-lik bakgrundsklickare (idle)
         self.idle_enable_var = tk.BooleanVar(value=True)
@@ -191,7 +199,7 @@ class CellBotV3:
         wrap.pack(fill="both", expand=True)
 
         header = ttk.Frame(wrap)
-        header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0,10))
+        header.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0,10))
         ttk.Label(header, text="CellBot v3", font=("Segoe UI", 14)).pack(side="left")
         ttk.Label(header, textvariable=self.status_var, foreground="#555").pack(side="right")
 
@@ -259,14 +267,23 @@ class CellBotV3:
         self.click_delay_entry = ttk.Entry(row_cfg2, width=8, textvariable=self.click_delay_var)
         self.click_delay_entry.pack(side="left")
 
-        # Toggles
+        # Toggles + TopN
         lf_tog = ttk.Labelframe(left, text="Behavior")
         lf_tog.pack(fill="x", pady=(0,10))
         ttk.Checkbutton(lf_tog, text="Use Tab 1", variable=self.use_tab1_var).pack(anchor="w", padx=6, pady=(6,0))
         ttk.Checkbutton(lf_tog, text="Use Tab 2", variable=self.use_tab2_var).pack(anchor="w", padx=6, pady=(2,0))
         ttk.Checkbutton(lf_tog, text="Use Tab 3", variable=self.use_tab3_var).pack(anchor="w", padx=6, pady=(2,6))
-        ttk.Checkbutton(lf_tog, text="Enable Top-3 x1 pre-pass", variable=self.enable_x1_prep_var).pack(anchor="w", padx=6, pady=(0,8))
-        ttk.Checkbutton(lf_tog, text="Boost on start", variable=self.boost_on_start_var).pack(anchor="w", padx=6, pady=(0,8))
+
+        row_topn = ttk.Frame(lf_tog); row_topn.pack(fill="x", pady=(2,2))
+        ttk.Checkbutton(row_topn, text="Enable Top-N x1 pre-pass (on Tab 2 by default)",
+                        variable=self.enable_x1_prep_var,
+                        command=self._update_topn_state).pack(side="left", padx=(6,6))
+        ttk.Label(row_topn, text="N=").pack(side="left")
+        # Spinbox för N
+        self.topn_spin = tk.Spinbox(row_topn, from_=1, to=99, width=4, textvariable=self.topn_var)
+        self.topn_spin.pack(side="left", padx=(4,6))
+
+        ttk.Checkbutton(lf_tog, text="Boost on start", variable=self.boost_on_start_var).pack(anchor="w", padx=6, pady=(4,8))
         ttk.Label(left, text="Hotkey: F6 start/stop • F6 again to stop", foreground="#777").pack(pady=(0,0))
 
         # Notebook med kontexter och listor
@@ -303,9 +320,20 @@ class CellBotV3:
         self.boost_label.pack(side="right", padx=8, pady=6)
         ttk.Button(boost_box, text="Pick Boost point", command=self._pick_boost).pack(side="left", padx=8, pady=6)
 
-        # Högerkolumn: Idle-klickare (v1-style)
+        # Högerkolumn topp: Ordning (ny)
+        order_box = ttk.Labelframe(wrap, text="Cycle order (TopN / Tab1 / Tab2 / Tab3)")
+        order_box.grid(row=1, column=3, sticky="nsew", padx=(10,0))
+        self.order_list = tk.Listbox(order_box, height=8)
+        self.order_list.pack(fill="both", expand=True, padx=8, pady=8)
+        btns = ttk.Frame(order_box); btns.pack(fill="x", padx=8, pady=(0,8))
+        ttk.Button(btns, text="Up", command=self._order_up).pack(side="left")
+        ttk.Button(btns, text="Down", command=self._order_down).pack(side="left", padx=6)
+        ttk.Button(btns, text="Reset", command=self._order_reset).pack(side="right")
+        self._order_refresh()
+
+        # Högerkolumn botten: Idle-klickare (v1-style)
         right = ttk.Labelframe(wrap, text="Idle clicker (v1-style between cycles)")
-        right.grid(row=1, column=3, sticky="nsew", padx=(10,0))
+        right.grid(row=2, column=3, sticky="nsew", padx=(10,0), pady=(10,0))
 
         ttk.Checkbutton(right, text="Enable idle clicker", variable=self.idle_enable_var).pack(anchor="w", padx=8, pady=(8,4))
 
@@ -338,6 +366,7 @@ class CellBotV3:
 
         self._update_click_delay_state()
         self._update_idle_mode_state()
+        self._update_topn_state()
 
     def _center(self):
         self.root.update_idletasks()
@@ -361,6 +390,13 @@ class CellBotV3:
             self.idle_x_entry.state(["disabled"])
             self.idle_y_entry.state(["disabled"])
 
+    def _update_topn_state(self):
+        state = "normal" if self.enable_x1_prep_var.get() else "disabled"
+        try:
+            self.topn_spin.configure(state=state)
+        except Exception:
+            pass  # om OS/python saknar state på Spinbox
+
     # ---------- Context utils ----------
     def _current_context(self):
         idx = self.notebook.index(self.notebook.select())
@@ -375,6 +411,48 @@ class CellBotV3:
             lb.delete(0, "end")
             for (x, y) in self.points[ctx][key]:
                 lb.insert("end", f"{x},{y}")
+
+    # ---------- Order UI ----------
+    def _order_labels(self):
+        mapping = {"topn": "TopN Buy", "t1": "Tab 1", "t2": "Tab 2", "t3": "Tab 3"}
+        return [mapping[k] for k in self.cycle_order]
+
+    def _order_refresh(self):
+        self.order_list.delete(0, "end")
+        for label in self._order_labels():
+            self.order_list.insert("end", label)
+        # välj första som default
+        if self.order_list.size() > 0:
+            self.order_list.selection_clear(0, "end")
+            self.order_list.selection_set(0)
+
+    def _order_up(self):
+        sel = self.order_list.curselection()
+        if not sel:
+            return
+        i = sel[0]
+        if i == 0:
+            return
+        self.cycle_order[i-1], self.cycle_order[i] = self.cycle_order[i], self.cycle_order[i-1]
+        self._order_refresh()
+        self.order_list.selection_clear(0, "end")
+        self.order_list.selection_set(i-1)
+
+    def _order_down(self):
+        sel = self.order_list.curselection()
+        if not sel:
+            return
+        i = sel[0]
+        if i >= len(self.cycle_order) - 1:
+            return
+        self.cycle_order[i+1], self.cycle_order[i] = self.cycle_order[i], self.cycle_order[i+1]
+        self._order_refresh()
+        self.order_list.selection_clear(0, "end")
+        self.order_list.selection_set(i+1)
+
+    def _order_reset(self):
+        self.cycle_order = ["topn", "t1", "t2", "t3"]
+        self._order_refresh()
 
     # ---------- Picking ----------
     def _pick_skip_ad(self):
@@ -488,7 +566,7 @@ class CellBotV3:
         for _ in range(int(times)):
             click_xy(*self.buymode_btn, settle=delay)
 
-    def _x1_prepass_top3(self, ctx, click_delay):
+    def _x1_prepass_topn(self, ctx, click_delay):
         # Kör ENBART på Generator-fliken (prepass_tab_key), så vi inte hamnar i Research.
         tab_key = self.prepass_tab_key  # default "t2"
         tab_pos = self._tab_pos_for_key(tab_key)
@@ -499,17 +577,33 @@ class CellBotV3:
         # SMART -> x1
         self._click_buymode(self.smart_to_x1_clicks, delay=click_delay)
 
-        # Köp de 3 översta raderna på den tabben (generatorlistan)
-        rows = list(self.points[ctx][tab_key])[:TOP_N_PREPASS]
+        # Köp de N översta raderna på den tabben (generatorlistan)
+        try:
+            n = max(1, int(self.topn_var.get()))
+        except:
+            n = DEFAULT_TOPN_PREPASS
+        rows = list(self.points[ctx][tab_key])[:n]
         for (x, y) in rows:
             click_xy(x, y, settle=click_delay)
 
-        # Viktigt: se till att vi står kvar på generator-fliken när vi växlar tillbaka,
-        # annars finns inte buy-mode-knappen. Klicka tab-pos igen som säkerhet.
+        # Säkerställ att vi står kvar på samma flik när vi växlar tillbaka (buy-mode-knappen synlig).
         click_xy(*tab_pos, settle=click_delay)
 
         # x1 -> SMART (4 klick)
         self._click_buymode(self.x1_to_smart_clicks, delay=click_delay)
+
+    def _perform_tab_clicks(self, tab_key, pts, click_delay):
+        # hoppa över om tabben ej är vald i toggles
+        if tab_key == "t1" and not self.use_tab1_var.get():
+            return
+        if tab_key == "t2" and not self.use_tab2_var.get():
+            return
+        if tab_key == "t3" and not self.use_tab3_var.get():
+            return
+
+        click_xy(*self._tab_pos_for_key(tab_key), settle=click_delay)
+        for (x, y) in pts:
+            click_xy(x, y, settle=click_delay)
 
     # ---------- Main loop: v2-cykel + v1-idle ----------
     def _run(self):
@@ -577,25 +671,17 @@ class CellBotV3:
                     # Menu Toggle
                     click_xy(*self.menu_toggle, settle=click_delay)
 
-                    # Prepass: x1 på Generator-fliken (t.ex. Tab 2) -> köp topp 3 -> tillbaka till SMART
-                    if self.enable_x1_prep_var.get():
-                        self._x1_prepass_top3(ctx, click_delay)
-
-                    # Nu är vi garanterat i SMART-läge igen. Fortsätt vanlig cykel.
-                    if self.use_tab1_var.get():
-                        click_xy(*self.tab1_pos, settle=click_delay)
-                        for (x, y) in pts_t1:
-                            click_xy(x, y, settle=click_delay)
-
-                    if self.use_tab2_var.get():
-                        click_xy(*self.tab2_pos, settle=click_delay)
-                        for (x, y) in pts_t2:
-                            click_xy(x, y, settle=click_delay)
-
-                    if self.use_tab3_var.get():
-                        click_xy(*self.tab3_pos, settle=click_delay)
-                        for (x, y) in pts_t3:
-                            click_xy(x, y, settle=click_delay)
+                    # Kör stegen enligt vald ordning
+                    for step in self.cycle_order:
+                        if step == "topn":
+                            if self.enable_x1_prep_var.get():
+                                self._x1_prepass_topn(ctx, click_delay)
+                        elif step == "t1":
+                            self._perform_tab_clicks("t1", pts_t1, click_delay)
+                        elif step == "t2":
+                            self._perform_tab_clicks("t2", pts_t2, click_delay)
+                        elif step == "t3":
+                            self._perform_tab_clicks("t3", pts_t3, click_delay)
 
                     # Boost sist om due
                     if now >= next_boost and self.boost_point:
