@@ -2,11 +2,11 @@
 # Kombinerar CellBot v2 (cyklisk sekvens med tabs/boost) med en "idle"-klickare
 # som beter sig som CellBot v1 mellan cyklerna.
 #
-# När den INTE kör sin cykel (loop every X s) så klickar den enligt bakgrunds-
-# klickarens inställningar: frekvens (Hz), läge (current eller fixed X/Y) och
-# med koordinat-picking. Nödstopp: flytta musen till övre vänstra hörnet (<5 px).
+# Önskad cykel (om x1-prepass är på):
+#   Skip Ad -> Menu Toggle -> Buy mode (x1) -> köp 3 första raderna (på Generator-fliken) ->
+#   Buy mode (4 klick) till SMART -> Tab1/Tab2/Tab3 (vanliga klick) -> ev. Boost
 #
-# Hotkey: F6 start/stop (samma som tidigare). Fönster: Tkinter.
+# Hotkey: F6 start/stop. Nödstopp: flytta musen till övre vänstra hörnet (<5 px).
 #
 # deps:
 #   pip install pynput pyautogui pillow
@@ -19,7 +19,6 @@ import tkinter as tk
 from tkinter import ttk
 import ctypes
 from ctypes import wintypes
-
 import pyautogui
 from pynput import keyboard, mouse
 
@@ -75,19 +74,25 @@ def set_cursor_pos(x, y):
 # -------------------- defaults (från v2 + v1) --------------------
 DEFAULT_LOOP_S = 60.0
 DEFAULT_BOOST_S = 965.0
-DEFAULT_CLICK_DELAY = 0.1  # ändrat till 0.1 s
+DEFAULT_CLICK_DELAY = 0.1
 DEFAULT_IDLE_HZ = 50.0
 EMERGENCY_MARGIN = 5  # px (övre vänstra hörnet)
 
-# Skip Ad standardkoordinat enligt bilden: (962, 712)
 DEFAULT_SKIP_AD_POS = (962, 712)
-
 DEFAULT_MENU_TOGGLE = (35, 427)
 DEFAULT_TAB1_POS = (47, 40)
 DEFAULT_TAB2_POS = (139, 41)
 DEFAULT_TAB3_POS = (223, 36)
 DEFAULT_BOOST_POINT = (654, 1028)
 
+# Buy-mode och x1-prepass
+DEFAULT_BUYMODE_POS = (468, 108)  # växla mellan SMART/x1
+DEFAULT_SMART_TO_X1_CLICKS = 1    # 1 klick till x1
+DEFAULT_X1_TO_SMART_CLICKS = 4    # 4 klick tillbaka till SMART
+TOP_N_PREPASS = 3                 # 3 första raderna (överst)
+PREPASS_TAB_KEY = "t2"            # Kör prepass endast på Generator-fliken (antag Tab 2)
+
+# Exempelkoordinater per tab och kontext
 CTX1_TAB1_POINTS = []
 CTX1_TAB2_POINTS = [
     (480, 246), (480, 341), (480, 442),
@@ -126,12 +131,19 @@ class CellBotV3:
         self.bot_thread = None
 
         # v2 fasta pos
-        self.skip_ad_pos = DEFAULT_SKIP_AD_POS  # ny
+        self.skip_ad_pos = DEFAULT_SKIP_AD_POS
         self.menu_toggle = DEFAULT_MENU_TOGGLE
         self.tab1_pos    = DEFAULT_TAB1_POS
         self.tab2_pos    = DEFAULT_TAB2_POS
         self.tab3_pos    = DEFAULT_TAB3_POS
         self.boost_point = DEFAULT_BOOST_POINT
+
+        # buy-mode och prepass
+        self.buymode_btn = DEFAULT_BUYMODE_POS
+        self.enable_x1_prep_var = tk.BooleanVar(value=True)  # bocka i/ur
+        self.smart_to_x1_clicks = DEFAULT_SMART_TO_X1_CLICKS
+        self.x1_to_smart_clicks = DEFAULT_X1_TO_SMART_CLICKS
+        self.prepass_tab_key = PREPASS_TAB_KEY  # "t1"/"t2"/"t3" (antag "t2" = Generator)
 
         # v2 per-kontext punkter
         self.points = {
@@ -158,9 +170,9 @@ class CellBotV3:
         # v1-lik bakgrundsklickare (idle)
         self.idle_enable_var = tk.BooleanVar(value=True)
         self.idle_hz_var     = tk.StringVar(value=f"{DEFAULT_IDLE_HZ}")
-        self.idle_mode_var   = tk.StringVar(value="fixed")  # ändrat: default fixed
-        self.idle_x_var      = tk.StringVar(value="1651")   # ändrat default
-        self.idle_y_var      = tk.StringVar(value="0")      # ändrat default
+        self.idle_mode_var   = tk.StringVar(value="fixed")
+        self.idle_x_var      = tk.StringVar(value="1651")
+        self.idle_y_var      = tk.StringVar(value="0")
 
         self.status_var = tk.StringVar(value="status: idle  •  press F6 to start/stop")
 
@@ -197,12 +209,19 @@ class CellBotV3:
         self.skip_ad_label.pack(side="right")
         ttk.Button(lf_tabs, text="Pick Skip Ad", command=self._pick_skip_ad).pack(fill="x")
 
-        # menu toggle
+        # Menu toggle
         mrow = ttk.Frame(lf_tabs); mrow.pack(fill="x", pady=6)
         ttk.Label(mrow, text="Menu toggle").pack(side="left")
         self.menu_label = ttk.Label(mrow, text=f"{self.menu_toggle[0]},{self.menu_toggle[1]}", foreground="#222")
         self.menu_label.pack(side="right")
         ttk.Button(lf_tabs, text="Pick Menu toggle", command=self._pick_menu_toggle).pack(fill="x")
+
+        # Buy mode button
+        brow = ttk.Frame(lf_tabs); brow.pack(fill="x", pady=6)
+        ttk.Label(brow, text="Buy mode button").pack(side="left")
+        self.buymode_label = ttk.Label(brow, text=f"{self.buymode_btn[0]},{self.buymode_btn[1]}", foreground="#222")
+        self.buymode_label.pack(side="right")
+        ttk.Button(lf_tabs, text="Pick Buy mode", command=self._pick_buymode).pack(fill="x")
 
         # Tab 1
         r1 = ttk.Frame(lf_tabs); r1.pack(fill="x", pady=6)
@@ -225,7 +244,7 @@ class CellBotV3:
         self.tab3_label.pack(side="right")
         ttk.Button(lf_tabs, text="Pick Tab 3", command=lambda: self._pick_tab("t3")).pack(fill="x")
 
-        # timing
+        # Timing
         lf_cfg = ttk.Labelframe(left, text="Timing")
         lf_cfg.pack(fill="x", pady=(0,10))
         row_cfg1 = ttk.Frame(lf_cfg); row_cfg1.pack(fill="x", pady=6)
@@ -240,12 +259,13 @@ class CellBotV3:
         self.click_delay_entry = ttk.Entry(row_cfg2, width=8, textvariable=self.click_delay_var)
         self.click_delay_entry.pack(side="left")
 
-        # toggles
+        # Toggles
         lf_tog = ttk.Labelframe(left, text="Behavior")
         lf_tog.pack(fill="x", pady=(0,10))
         ttk.Checkbutton(lf_tog, text="Use Tab 1", variable=self.use_tab1_var).pack(anchor="w", padx=6, pady=(6,0))
         ttk.Checkbutton(lf_tog, text="Use Tab 2", variable=self.use_tab2_var).pack(anchor="w", padx=6, pady=(2,0))
         ttk.Checkbutton(lf_tog, text="Use Tab 3", variable=self.use_tab3_var).pack(anchor="w", padx=6, pady=(2,6))
+        ttk.Checkbutton(lf_tog, text="Enable Top-3 x1 pre-pass", variable=self.enable_x1_prep_var).pack(anchor="w", padx=6, pady=(0,8))
         ttk.Checkbutton(lf_tog, text="Boost on start", variable=self.boost_on_start_var).pack(anchor="w", padx=6, pady=(0,8))
         ttk.Label(left, text="Hotkey: F6 start/stop • F6 again to stop", foreground="#777").pack(pady=(0,0))
 
@@ -309,8 +329,6 @@ class CellBotV3:
         self.idle_y_entry.pack(side="left", padx=(4,12))
         ttk.Button(pos_frame, text="Pick on screen", command=self._pick_idle_pos).pack(side="left")
 
-        ttk.Label(right, text="Nödstopp: flytta musen till översta vänstra hörnet (<5 px)", foreground="#777").pack(anchor="w", padx=8, pady=(6,8))
-
         # Grid weights
         wrap.grid_rowconfigure(1, weight=1)
         wrap.grid_columnconfigure(0, weight=1)
@@ -367,6 +385,10 @@ class CellBotV3:
         self.status_var.set("pick: click Menu toggle…")
         self._pick_one(self._set_menu_toggle)
 
+    def _pick_buymode(self):
+        self.status_var.set("pick: click Buy mode button…")
+        self._pick_one(self._set_buymode)
+
     def _pick_tab(self, which):
         label = {"t1": "Tab 1", "t2": "Tab 2", "t3": "Tab 3"}[which]
         self.status_var.set(f"pick: click {label}…")
@@ -420,6 +442,10 @@ class CellBotV3:
         self.menu_toggle = pt
         self.menu_label.config(text=f"{pt[0]},{pt[1]}", foreground="#222")
 
+    def _set_buymode(self, pt):
+        self.buymode_btn = pt
+        self.buymode_label.config(text=f"{pt[0]},{pt[1]}", foreground="#222")
+
     def _set_tab_pos(self, which, pt):
         if which == "t1":
             self.tab1_pos = pt
@@ -449,6 +475,41 @@ class CellBotV3:
             self.status_var.set("status: running  •  press F6 to stop")
             self.bot_thread = threading.Thread(target=self._run, daemon=True)
             self.bot_thread.start()
+
+    # ---------- Hjälpare ----------
+    def _tab_pos_for_key(self, key):
+        if key == "t1":
+            return self.tab1_pos
+        if key == "t2":
+            return self.tab2_pos
+        return self.tab3_pos
+
+    def _click_buymode(self, times=1, delay=0.05):
+        for _ in range(int(times)):
+            click_xy(*self.buymode_btn, settle=delay)
+
+    def _x1_prepass_top3(self, ctx, click_delay):
+        # Kör ENBART på Generator-fliken (prepass_tab_key), så vi inte hamnar i Research.
+        tab_key = self.prepass_tab_key  # default "t2"
+        tab_pos = self._tab_pos_for_key(tab_key)
+
+        # Gå först till rätt tab så buy-mode-knappen finns i bild.
+        click_xy(*tab_pos, settle=click_delay)
+
+        # SMART -> x1
+        self._click_buymode(self.smart_to_x1_clicks, delay=click_delay)
+
+        # Köp de 3 översta raderna på den tabben (generatorlistan)
+        rows = list(self.points[ctx][tab_key])[:TOP_N_PREPASS]
+        for (x, y) in rows:
+            click_xy(x, y, settle=click_delay)
+
+        # Viktigt: se till att vi står kvar på generator-fliken när vi växlar tillbaka,
+        # annars finns inte buy-mode-knappen. Klicka tab-pos igen som säkerhet.
+        click_xy(*tab_pos, settle=click_delay)
+
+        # x1 -> SMART (4 klick)
+        self._click_buymode(self.x1_to_smart_clicks, delay=click_delay)
 
     # ---------- Main loop: v2-cykel + v1-idle ----------
     def _run(self):
@@ -504,30 +565,33 @@ class CellBotV3:
 
                 # 1) Kör cykeln när det är dags
                 if now >= next_cycle:
-                    pts_t1 = list(self.points[ctx]["t1"])  # kopior för trådtrygghet
+                    # kopior för trådtrygghet
+                    pts_t1 = list(self.points[ctx]["t1"])
                     pts_t2 = list(self.points[ctx]["t2"])
                     pts_t3 = list(self.points[ctx]["t3"])
 
-                    # Skip Ad innan Menu Toggle
+                    # Skip Ad
                     if self.skip_ad_pos:
                         click_xy(*self.skip_ad_pos, settle=click_delay)
 
                     # Menu Toggle
                     click_xy(*self.menu_toggle, settle=click_delay)
 
-                    # Tab 1
+                    # Prepass: x1 på Generator-fliken (t.ex. Tab 2) -> köp topp 3 -> tillbaka till SMART
+                    if self.enable_x1_prep_var.get():
+                        self._x1_prepass_top3(ctx, click_delay)
+
+                    # Nu är vi garanterat i SMART-läge igen. Fortsätt vanlig cykel.
                     if self.use_tab1_var.get():
                         click_xy(*self.tab1_pos, settle=click_delay)
                         for (x, y) in pts_t1:
                             click_xy(x, y, settle=click_delay)
 
-                    # Tab 2
                     if self.use_tab2_var.get():
                         click_xy(*self.tab2_pos, settle=click_delay)
                         for (x, y) in pts_t2:
                             click_xy(x, y, settle=click_delay)
 
-                    # Tab 3
                     if self.use_tab3_var.get():
                         click_xy(*self.tab3_pos, settle=click_delay)
                         for (x, y) in pts_t3:
@@ -546,14 +610,13 @@ class CellBotV3:
 
                 # 2) Annars idle-klicka i mellanrummen (v1-style)
                 else:
-                    if idle_enabled:
-                        if now >= next_idle_click:
-                            if idle_mode == "current":
-                                send_left_click()
-                            else:
-                                set_cursor_pos(idle_x, idle_y)
-                                send_left_click()
-                            next_idle_click = now + idle_interval
+                    if idle_enabled and now >= next_idle_click:
+                        if idle_mode == "current":
+                            send_left_click()
+                        else:
+                            set_cursor_pos(idle_x, idle_y)
+                            send_left_click()
+                        next_idle_click = now + idle_interval
 
                 time.sleep(0.003)
 
